@@ -46,6 +46,17 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
+	commands := map[string]func(net.Conn, []string){
+		"PING": func(c net.Conn, args []string) { sendMessage(c, "PONG") },
+		"ECHO": func(c net.Conn, args []string) {
+			if len(args) > 1 {
+				sendMessage(c, args[1])
+			} else {
+				sendMessage(c, "-ERR ECHO requires a message")
+			}
+		},
+	}
+
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -60,11 +71,14 @@ func handleConnection(conn net.Conn) {
 			continue
 		}
 
-		if len(args) > 0 && strings.ToUpper(args[0]) == "PING" {
-			sendMessage(conn, "PONG")
-		} else {
-			conn.Write([]byte("-ERR unknown command\r\n"))
-			fmt.Println("⚠️ Unknown command:", args)
+		if len(args) > 0 {
+			command := strings.ToUpper(args[0])
+			if handler, exists := commands[command]; exists {
+				handler(conn, args)
+			} else {
+				conn.Write([]byte("-ERR unknown command\r\n"))
+				fmt.Println("⚠️ Unknown command:", args)
+			}
 		}
 	}
 }
