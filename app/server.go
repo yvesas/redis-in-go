@@ -47,20 +47,21 @@ func handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 
 	commands := map[string]func(net.Conn, []string){
-		"PING": func(c net.Conn, args []string) { sendMessage(c, "PONG") },
+		"PING": func(c net.Conn, args []string) { sendReply(c, "PONG") },
 		"ECHO": func(c net.Conn, args []string) {
 			if len(args) > 1 {
-				sendMessage(c, args[1])
+				sendReply(c, args[1])
 			} else {
-				sendMessage(c, "-ERR ECHO requires a message")
+				sendReply(c, "-ERR ECHO requires a message")
 			}
 		},
 	}
 
 	for {
+		fmt.Println("-------")
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Println("⚠️ Client disconnected.")
+			// fmt.Println("⚠️ Client disconnected.")
 			return
 		}
 
@@ -68,6 +69,12 @@ func handleConnection(conn net.Conn) {
 		if err != nil {
 			fmt.Println("⚠️ Error parsing request:", err)
 			conn.Write([]byte("-ERR invalid request\r\n"))
+			continue
+		}
+
+		fmt.Println("📥 Received args:", args)
+		if len(args) == 0 {
+			conn.Write([]byte("-ERR empty command\r\n"))
 			continue
 		}
 
@@ -83,7 +90,7 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func sendMessage(conn net.Conn, message string) {
+func sendReply(conn net.Conn, message string) {
 	response := fmt.Sprintf("+%s\r\n", message)
 	_, err := conn.Write([]byte(response))
 	if err != nil {
