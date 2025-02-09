@@ -21,8 +21,10 @@ func main() {
 		fmt.Printf("❌ Failed to bind to address %s: %v\n", address, err)
 		os.Exit(1)
 	}
-	defer l.Close() // ??? Listener date when exiting the function
+	defer l.Close()
 	fmt.Printf("✅ Server listening on address %s\n", address)
+
+	store := NewInMemoryStore()
 
 	for {
 		conn, err := l.Accept()
@@ -31,30 +33,21 @@ func main() {
 			continue                                               // Keep trying to accept new connections.
 		}
 
-		go handleConnection(conn)
-		// _, writeErr := conn.Write([]byte("+PONG\r\n"))
-		// if writeErr != nil {
-		// 	fmt.Printf("⚠️ Failed to answered (write to connection): %v\n", writeErr)
-		// } else {
-		// 	fmt.Println("✅ Answered with success.")
-		// }
-		// conn.Close()
+		go handleConnection(conn, store)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, store *InMemoryStore) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
-	commands := map[string]func(net.Conn, []string){
-		"PING": func(c net.Conn, args []string) { sendReply(c, "PONG") },
-		"ECHO": func(c net.Conn, args []string) {
-			if len(args) > 1 {
-				sendReply(c, args[1])
-			} else {
-				sendReply(c, "-ERR ECHO requires a message")
-			}
-		},
+	commands := map[string]func(net.Conn, []string, *InMemoryStore){
+		"PING": func(c net.Conn, args []string, store *InMemoryStore) { sendReply(c, "PONG") },
+		"ECHO": runEcho,
+		"LIST": runListKeys,
+		"DEL":  runDelete,
+		"SET":  runSet,
+		"GET":  runGet,
 	}
 
 	for {
@@ -67,74 +60,118 @@ func handleConnection(conn net.Conn) {
 
 		args, err := parseRESP(line, reader)
 		if err != nil {
-			fmt.Println("⚠️ Error parsing request:", err)
-			conn.Write([]byte("-ERR invalid request\r\n"))
+			fmt.Println("❌ Error parsing request:", err)
+			conn.Write([]byte("❌ Invalid request\r\n"))
 			continue
 		}
 
 		fmt.Println("📥 Received args:", args)
 		if len(args) == 0 {
-			conn.Write([]byte("-ERR empty command\r\n"))
+			conn.Write([]byte("❌ Empty command\r\n"))
 			continue
 		}
 
 		if len(args) > 0 {
 			command := strings.ToUpper(args[0])
 			if handler, exists := commands[command]; exists {
-				handler(conn, args)
+				handler(conn, args, store)
 			} else {
-				conn.Write([]byte("-ERR unknown command\r\n"))
-				fmt.Println("⚠️ Unknown command:", args)
+				conn.Write([]byte("❌ Unknown command\r\n"))
+				fmt.Println("❌ Unknown command:", args)
 			}
 		}
 	}
 }
 
-func sendReply(conn net.Conn, message string) {
-	response := fmt.Sprintf("+%s\r\n", message)
+func sendReply(conn net.Conn, message string, data ...interface{}) {
+	var response string
+
+	if len(data) == 0 {
+		response = fmt.Sprintf("+%s\r\n", message)
+	} else {
+		switch v := data[0].(type) {
+		case string:
+			response = fmt.Sprintf("+%s %s\r\n", message, v)
+		case int:
+			response = fmt.Sprintf("+%s %d\r\n", message, v)
+		case []string:
+			response = fmt.Sprintf("+%s %v\r\n", message, strings.Join(v, ", "))
+		case map[string]string:
+			var items []string
+			for key, value := range v {
+				items = append(items, fmt.Sprintf("[%s] -> %s", key, value))
+			}
+			response = fmt.Sprintf("+%s %s\r\n", message, strings.Join(items, ", "))
+		default:
+			response = "❌ Error in sendReply - Unsupported data type\r\n"
+		}
+	}
+
 	_, err := conn.Write([]byte(response))
 	if err != nil {
-		fmt.Println("⚠️ Error sending response:", err)
+		fmt.Println("❌ Error sending response:", err)
 		return
 	}
 	fmt.Println("✅ Answered with success. Sent: ", message)
 }
 
-// 📌 Função para interpretar o protocolo RESP (simplificado para comandos básicos) feito com ajuda de IA.
-func parseRESP(firstLine string, reader *bufio.Reader) ([]string, error) {
-	// Se o primeiro caractere for "*", significa que é um array
-	if strings.HasPrefix(firstLine, "*") {
-		numArgs := 0
-		fmt.Sscanf(firstLine, "*%d", &numArgs)
-
-		args := make([]string, 0, numArgs)
-		for i := 0; i < numArgs; i++ {
-			// Lê a linha que contém o tamanho do argumento
-			sizeLine, err := reader.ReadString('\n')
-			if err != nil {
-				return nil, err
-			}
-
-			// Pega apenas o valor após o "$", que é o tamanho
-			var argSize int
-			fmt.Sscanf(sizeLine, "$%d", &argSize)
-
-			// Lê a linha do argumento com o tamanho certo
-			arg := make([]byte, argSize)
-			_, err = reader.Read(arg)
-			if err != nil {
-				return nil, err
-			}
-
-			// Adiciona o argumento ao array
-			args = append(args, string(arg))
-
-			// Lê o '\r\n' final
-			reader.ReadString('\n')
-		}
-		return args, nil
+func runEcho(conn net.Conn, args []string, store *InMemoryStore) {
+	if len(args) > 1 {
+		sendReply(conn, args[1])
+	} else {
+		sendReply(conn, "⚠️ ECHO requires a message")
+	}
+}
+func runSet(conn net.Conn, args []string, store *InMemoryStore) {
+	if len(args) <= 2 {
+		sendReply(conn, "⚠️ Invalid key or value. Both must be non-empty.")
+		return
 	}
 
-	// Caso contrário, retorna erro
-	return nil, fmt.Errorf("invalid RESP format")
+	msg, err := store.Set(args[1], args[2])
+
+	if err != nil {
+		sendReply(conn, err.Error())
+		return
+	}
+
+	sendReply(conn, "OK", msg)
+}
+func runGet(conn net.Conn, args []string, store *InMemoryStore) {
+	if len(args) <= 1 {
+		sendReply(conn, "⚠️ Invalid key. Must be non-empty.")
+		return
+	}
+
+	value, err := store.Get(args[1])
+	if err != nil {
+		sendReply(conn, err.Error())
+		return
+	}
+
+	sendReply(conn, value)
+
+}
+func runListKeys(conn net.Conn, args []string, store *InMemoryStore) {
+	keys, err := store.ListKeys()
+	if err != nil {
+		sendReply(conn, err.Error())
+		return
+	}
+
+	sendReply(conn, "✅ Keys in Store:", keys)
+}
+
+func runDelete(conn net.Conn, args []string, store *InMemoryStore) {
+	if len(args) <= 1 {
+		sendReply(conn, "⚠️ Invalid key. Must be non-empty.")
+		return
+	}
+	msg, err := store.Delete(args[1])
+	if err != nil {
+		sendReply(conn, err.Error())
+		return
+	}
+	sendReply(conn, msg)
+
 }
