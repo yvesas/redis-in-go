@@ -24,7 +24,7 @@ func (store *InMemoryStore) Set(key string, value string) (string, error) {
 	}()
 
 	if key == "" || value == "" {
-		return "", fmt.Errorf("⚠️ Invalid key or value. Both must be non-empty.")
+		return "", fmt.Errorf("-ERR ⚠️ Invalid key or value. Both must be non-empty")
 	}
 
 	store.mu.Lock()
@@ -68,14 +68,14 @@ func (store *InMemoryStore) Delete(key string) (string, error) {
 	}()
 
 	if key == "" {
-		return "", fmt.Errorf("⚠️ Invalid key. Must be non-empty.")
+		return "", fmt.Errorf("-ERR ⚠️ Invalid key. Must be non-empty")
 	}
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
 	if _, exists := store.data[key]; !exists {
-		return "", fmt.Errorf("⚠️ Key not found.")
+		return "", fmt.Errorf("-ERR ⚠️ Key not found")
 	}
 
 	delete(store.data, key)
@@ -98,7 +98,7 @@ func (store *InMemoryStore) ListKeys() ([]string, error) {
 	}
 
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("⚠️ No keys found. Store is empty.")
+		return nil, fmt.Errorf("-ERR ⚠️ No keys found. Store is empty")
 	}
 
 	return keys, nil

@@ -61,13 +61,13 @@ func handleConnection(conn net.Conn, store *InMemoryStore) {
 		args, err := parseRESP(line, reader)
 		if err != nil {
 			fmt.Println("❌ Error parsing request:", err)
-			conn.Write([]byte("❌ Invalid request\r\n"))
+			conn.Write([]byte(" ❌ Invalid request\r\n"))
 			continue
 		}
 
 		fmt.Println("📥 Received args:", args)
 		if len(args) == 0 {
-			conn.Write([]byte("❌ Empty command\r\n"))
+			conn.Write([]byte(" ❌ Empty command\r\n"))
 			continue
 		}
 
@@ -76,43 +76,44 @@ func handleConnection(conn net.Conn, store *InMemoryStore) {
 			if handler, exists := commands[command]; exists {
 				handler(conn, args, store)
 			} else {
-				conn.Write([]byte("❌ Unknown command\r\n"))
+				conn.Write([]byte(" ❌ Unknown command\r\n"))
 				fmt.Println("❌ Unknown command:", args)
 			}
 		}
 	}
 }
 
-func sendReply(conn net.Conn, message string, data ...interface{}) {
+func sendReply(conn net.Conn, message interface{}) {
 	var response string
 
-	if len(data) == 0 {
-		response = fmt.Sprintf("+%s\r\n", message)
-	} else {
-		switch v := data[0].(type) {
-		case string:
-			response = fmt.Sprintf("+%s %s\r\n", message, v)
-		case int:
-			response = fmt.Sprintf("+%s %d\r\n", message, v)
-		case []string:
-			response = fmt.Sprintf("+%s %v\r\n", message, strings.Join(v, ", "))
-		case map[string]string:
-			var items []string
-			for key, value := range v {
-				items = append(items, fmt.Sprintf("[%s] -> %s", key, value))
-			}
-			response = fmt.Sprintf("+%s %s\r\n", message, strings.Join(items, ", "))
-		default:
-			response = "❌ Error in sendReply - Unsupported data type\r\n"
+	switch v := message.(type) {
+	case string:
+		if strings.HasPrefix(v, "ERR") {
+			response = fmt.Sprintf("-%s\r\n", v)
+		} else {
+			response = fmt.Sprintf("+%s\r\n", v)
 		}
+	case error:
+		response = fmt.Sprintf("-%s\r\n", v.Error())
+	case int:
+		response = fmt.Sprintf(":%d\r\n", v)
+	case []string:
+		response = formatArray(v)
+	case map[string]string:
+		var items []string
+		for key, value := range v {
+			items = append(items, fmt.Sprintf("[%s] -> %s", key, value))
+		}
+		response = formatArray(items)
+	default:
+		response = " Unsupported data type\r\n"
 	}
 
 	_, err := conn.Write([]byte(response))
 	if err != nil {
 		fmt.Println("❌ Error sending response:", err)
-		return
 	}
-	fmt.Println("✅ Answered with success. Sent: ", message)
+	fmt.Println("✅ Sent:", response)
 }
 
 func runEcho(conn net.Conn, args []string, store *InMemoryStore) {
@@ -128,18 +129,19 @@ func runSet(conn net.Conn, args []string, store *InMemoryStore) {
 		return
 	}
 
-	msg, err := store.Set(args[1], args[2])
+	_, err := store.Set(args[1], args[2])
 
 	if err != nil {
 		sendReply(conn, err.Error())
 		return
 	}
 
-	sendReply(conn, "OK", msg)
+	sendReply(conn, "OK")
 }
+
 func runGet(conn net.Conn, args []string, store *InMemoryStore) {
 	if len(args) <= 1 {
-		sendReply(conn, "⚠️ Invalid key. Must be non-empty.")
+		sendReply(conn, " ⚠️ Invalid key. Must be non-empty.")
 		return
 	}
 
@@ -158,13 +160,13 @@ func runListKeys(conn net.Conn, args []string, store *InMemoryStore) {
 		sendReply(conn, err.Error())
 		return
 	}
-
-	sendReply(conn, "✅ Keys in Store:", keys)
+	// sendReply(conn, "✅ Keys in Store:", keys)
+	sendReply(conn, keys)
 }
 
 func runDelete(conn net.Conn, args []string, store *InMemoryStore) {
 	if len(args) <= 1 {
-		sendReply(conn, "⚠️ Invalid key. Must be non-empty.")
+		sendReply(conn, " ⚠️ Invalid key. Must be non-empty.")
 		return
 	}
 	msg, err := store.Delete(args[1])
