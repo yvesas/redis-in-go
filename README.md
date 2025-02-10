@@ -1,33 +1,91 @@
 [![progress-banner](https://backend.codecrafters.io/progress/redis/e0c3f2e0-21f6-4f38-812f-a78489eb9959)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
 
-This is a starting point for Go solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+This is  **my solution** for Codecraftes challenge:
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+[&#34;Build Your Own Redis&#34; Challenge](https://codecrafters.io/challenges/redis).
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+### Dependencies
 
-# Passing the first stage
+Install redis-cli: [instructions
+](https://redis.io/docs/latest/operate/oss_and_stack/install/install-redis/)
 
-The entry point for your Redis implementation is in `app/server.go`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+Install go: [instructions](https://go.dev/doc/install)
+
+# Running the project
 
 ```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
+./run.sh
 ```
 
-That's all!
+## Use as the Client
 
-# Stage 2 & beyond
+In another terminal, simulate the client using redis-cli.
+You can test the existing commands: PING, ECHO, SET, GET, LIST, DELETE.
+Any command can be sent in **camelcase**, **uppercase** or **lowercase**.
 
-Note: This section is for stages 2 and beyond.
+Key not found or return **nil**: `$-1`
 
-1. Ensure you have `go (1.19)` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `app/server.go`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+```sh
+redis-cli ping
+PONG
+```
+
+```sh
+redis-cli Echo hey
+hey
+```
+
+```sh
+redis-cli set foo bar
+OK
+```
+
+```sh
+redis-cli get foo
+bar
+```
+
+```sh
+redis-cli list
+1) "foo"
+```
+
+```sh
+redis-cli DEL foo
+1  # deleted key numbers
+```
+
+```sh
+redis-cli set foo bar px 100 # Sets the key "foo" to "bar" with an expiry of 100 milliseconds
+OK
+```
+
+```sh
+redis-cli get foo
+$-1
+```
+
+Key not found or return **nil**: `$-1`
+
+In another scenario, Delete **(DEL)** can receive more than one key, for example in Store there is [foo, foo2, foo3]:
+
+```sh
+redis-cli del foo foo3
+2
+```
+
+```sh
+redis-cli list
+1) "foo2"
+```
+
+# Tests
+
+Runnig tests in local:
+
+```
+gotestsum --junitfile test-results.xml --format testname
+```
+
+
+__

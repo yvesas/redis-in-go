@@ -94,26 +94,35 @@ func (store *InMemoryStore) Get(key string) (string, error) {
 	return value, nil
 }
 
-func (store *InMemoryStore) Delete(key string) (string, error) {
+func (store *InMemoryStore) Delete(keys []string) (int, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("❌ Panic recovered in Delete:", r)
 		}
 	}()
 
-	if key == "" {
-		return "", fmt.Errorf("-ERR ⚠️ Invalid key. Must be non-empty")
+	fmt.Println(">> ✅ Keys: ", keys)
+
+	if len(keys) < 1 {
+		fmt.Println("⚠️ Invalid key. Must be non-empty")
+		return 0, fmt.Errorf("-ERR Invalid key. Must be non-empty")
 	}
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	if _, exists := store.data[key]; !exists {
-		return "", fmt.Errorf("-ERR ⚠️ Key not found")
+	count := 0
+	for _, key := range keys {
+		if _, exists := store.data[key]; !exists {
+			fmt.Println("⚠️ Key not found: ", key)
+			continue
+		}
+		delete(store.data, key)
+		count++
+		fmt.Println("✅ Deleted key: ", key)
 	}
 
-	delete(store.data, key)
-	return fmt.Sprintf("✅ Deleted key: %s", key), nil
+	return count, nil
 }
 
 func (store *InMemoryStore) ListKeys() ([]string, error) {

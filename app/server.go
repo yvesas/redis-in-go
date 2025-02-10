@@ -5,16 +5,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
-
-var _ = net.Listen
-var _ = os.Exit
 
 func main() {
 	host := "0.0.0.0"
 	port := 6379
-	address := fmt.Sprintf("%s:%d", host, port) // joins string and number into one string
+	address := fmt.Sprintf("%s:%d", host, port)
 
 	l, err := net.Listen("tcp", address)
 	if err != nil {
@@ -29,8 +27,8 @@ func main() {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			fmt.Printf("⚠️ Error accepting connection: %v\n", err) // err.Error()
-			continue                                               // Keep trying to accept new connections.
+			fmt.Printf("⚠️ Error accepting connection: %v\n", err)
+			continue
 		}
 
 		go handleConnection(conn, store)
@@ -44,10 +42,10 @@ func handleConnection(conn net.Conn, store *InMemoryStore) {
 	commands := map[string]func(net.Conn, []string, *InMemoryStore){
 		"PING": func(c net.Conn, args []string, store *InMemoryStore) { sendReply(c, "PONG") },
 		"ECHO": runEcho,
-		"LIST": runListKeys,
-		"DEL":  runDelete,
 		"SET":  runSet,
 		"GET":  runGet,
+		"DEL":  runDelete,
+		"LIST": runListKeys,
 	}
 
 	for {
@@ -61,24 +59,22 @@ func handleConnection(conn net.Conn, store *InMemoryStore) {
 		args, err := parseRESP(line, reader)
 		if err != nil {
 			fmt.Println("❌ Error parsing request:", err)
-			conn.Write([]byte(" ❌ Invalid request\r\n"))
+			sendReply(conn, err.Error())
 			continue
 		}
 
 		fmt.Println("📥 Received args:", args)
 		if len(args) == 0 {
-			conn.Write([]byte(" ❌ Empty command\r\n"))
+			sendReply(conn, "-ERR Empty command")
 			continue
 		}
 
-		if len(args) > 0 {
-			command := strings.ToUpper(args[0])
-			if handler, exists := commands[command]; exists {
-				handler(conn, args, store)
-			} else {
-				conn.Write([]byte(" ❌ Unknown command\r\n"))
-				fmt.Println("❌ Unknown command:", args)
-			}
+		command := strings.ToUpper(args[0])
+		if handler, exists := commands[command]; exists {
+			handler(conn, args, store)
+		} else {
+			fmt.Println("❌ Unknown command:", args)
+			sendReply(conn, "-ERR Unknown command")
 		}
 	}
 }
@@ -88,30 +84,25 @@ func sendReply(conn net.Conn, message interface{}) {
 
 	switch v := message.(type) {
 	case string:
-		if strings.HasPrefix(v, "ERR") {
-			response = fmt.Sprintf("-%s\r\n", v)
+		if strings.HasPrefix(v, "-ERR") {
+			response = fmt.Sprintf("%s\r\n", v)
 		} else {
 			response = fmt.Sprintf("+%s\r\n", v)
 		}
 	case error:
-		response = fmt.Sprintf("-%s\r\n", v.Error())
+		response = fmt.Sprintf("-ERR %s\r\n", v.Error())
 	case int:
 		response = fmt.Sprintf(":%d\r\n", v)
 	case []string:
 		response = formatArray(v)
-	case map[string]string:
-		var items []string
-		for key, value := range v {
-			items = append(items, fmt.Sprintf("[%s] -> %s", key, value))
-		}
-		response = formatArray(items)
 	default:
-		response = " Unsupported data type\r\n"
+		response = "-ERR Unsupported data type\r\n"
 	}
 
 	_, err := conn.Write([]byte(response))
 	if err != nil {
 		fmt.Println("❌ Error sending response:", err)
+		fmt.Println("-ERR Error sending response:", err)
 	}
 	fmt.Println("✅ Sent:", response)
 }
@@ -120,12 +111,13 @@ func runEcho(conn net.Conn, args []string, store *InMemoryStore) {
 	if len(args) > 1 {
 		sendReply(conn, args[1])
 	} else {
-		sendReply(conn, "⚠️ ECHO requires a message")
+		sendReply(conn, "-ERR ECHO requires a message")
 	}
 }
+
 func runSet(conn net.Conn, args []string, store *InMemoryStore) {
 	if len(args) < 3 {
-		sendReply(conn, "⚠️ Invalid SET command. Usage: SET key value [PX milliseconds]")
+		sendReply(conn, "-ERR Invalid SET command. Usage: SET key value [PX milliseconds]")
 		return
 	}
 
@@ -133,7 +125,12 @@ func runSet(conn net.Conn, args []string, store *InMemoryStore) {
 	var ttlMs int64 = 0
 
 	if len(args) == 5 && strings.ToUpper(args[3]) == "PX" {
-		fmt.Sscanf(args[4], "%d", &ttlMs)
+		parsedTTL, err := strconv.ParseInt(args[4], 10, 64)
+		if err != nil || parsedTTL <= 0 {
+			sendReply(conn, "-ERR PX argument must be a positive integer")
+			return
+		}
+		ttlMs = parsedTTL
 	}
 
 	_, err := store.Set(key, value, ttlMs)
@@ -142,45 +139,46 @@ func runSet(conn net.Conn, args []string, store *InMemoryStore) {
 		sendReply(conn, err.Error())
 		return
 	}
-
 	sendReply(conn, "OK")
 }
 
 func runGet(conn net.Conn, args []string, store *InMemoryStore) {
 	if len(args) <= 1 {
-		sendReply(conn, " ⚠️ Invalid key. Must be non-empty.")
+		sendReply(conn, "-ERR Invalid key")
 		return
 	}
 
 	value, err := store.Get(args[1])
 	if err != nil {
-		sendReply(conn, err.Error())
+		sendReply(conn, value)
 		return
 	}
 
 	sendReply(conn, value)
-
-}
-func runListKeys(conn net.Conn, args []string, store *InMemoryStore) {
-	keys, err := store.ListKeys()
-	if err != nil {
-		sendReply(conn, err.Error())
-		return
-	}
-	// sendReply(conn, "✅ Keys in Store:", keys)
-	sendReply(conn, keys)
 }
 
 func runDelete(conn net.Conn, args []string, store *InMemoryStore) {
 	if len(args) <= 1 {
-		sendReply(conn, " ⚠️ Invalid key. Must be non-empty.")
+		sendReply(conn, "-ERR Invalid key")
 		return
 	}
-	msg, err := store.Delete(args[1])
+
+	fmt.Println(">> ✅ Keys: ", args[1:])
+
+	count, err := store.Delete(args[1:])
 	if err != nil {
 		sendReply(conn, err.Error())
 		return
 	}
-	sendReply(conn, msg)
+	sendReply(conn, count)
+}
 
+func runListKeys(conn net.Conn, args []string, store *InMemoryStore) {
+	keys, err := store.ListKeys()
+	if err != nil {
+		sendReply(conn, "$-1") // Empty array in RESP
+		return
+	}
+	fmt.Println("✅ Keys in Store:", keys)
+	sendReply(conn, keys)
 }

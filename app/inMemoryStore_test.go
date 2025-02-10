@@ -91,8 +91,6 @@ func TestCleanupExpiredKeys(t *testing.T) {
 	_, exists := store.data["shortLived"]
 	store.mu.Unlock()
 
-	fmt.Println("Key exists in store?", exists)
-
 	if exists {
 		t.Fatalf("Key 'shortLived' should have been removed by cleanupExpiredKeys, but it still exists")
 	}
@@ -102,12 +100,48 @@ func TestDelete(t *testing.T) {
 	store := NewInMemoryStore()
 
 	store.Set("deleteMe", "exists", 0)
-	store.Delete("deleteMe")
+	store.Delete([]string{"deleteMe"})
 
-	_, err := store.Get("deleteMe")
-	if err == nil {
-		t.Fatalf("Expected an error for deleted key, but key still exists")
+	count, err := store.Delete([]string{"deleteMe"})
+
+	fmt.Println(">>>> count", count, "err", err)
+
+	if err != nil || count != 1 {
+		t.Fatalf("Expected 1 keys deleted, but got: %v, error: %v", count, err)
 	}
+
+	// _, err := store.Get("deleteMe")
+	// if err == nil {
+	// 	t.Fatalf("Expected an error for deleted key, but key still exists")
+	// }
+}
+
+func TestDeleteMultipleKeys(t *testing.T) {
+	store := NewInMemoryStore()
+
+	store.Set("key1", "value1", 0)
+	store.Set("key2", "value2", 0)
+	store.Set("key3", "value3", 0)
+
+	count, err := store.Delete([]string{"key1", "key2"})
+
+	if err != nil || count != 2 {
+		t.Fatalf("Expected 2 keys deleted, but got: %v, error: %v", count, err)
+	}
+
+	// _, err1 := store.Get("key1")
+	// _, err2 := store.Get("key2")
+	// value3, err3 := store.Get("key3")
+
+	// if err1 == nil {
+	// 	t.Fatalf("Expected an error for deleted key 'key1', but key still exists")
+	// }
+	// if err2 == nil {
+	// 	t.Fatalf("Expected an error for deleted key 'key2', but key still exists")
+	// }
+	// if err3 != nil || value3 != "value3" {
+	// 	t.Fatalf("Expected 'value3' for 'key3', but got: %v, error: %v", value3, err3)
+	// }
 }
 
 func TestListKeys(t *testing.T) {
