@@ -101,8 +101,6 @@ func (store *InMemoryStore) Delete(keys []string) (int, error) {
 		}
 	}()
 
-	fmt.Println("<>--> Delete > Keys: ", keys)
-
 	if len(keys) < 1 {
 		fmt.Println("⚠️ Invalid key. Must be non-empty")
 		return 0, fmt.Errorf("-ERR Invalid key. Must be non-empty")
