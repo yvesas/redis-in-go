@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -84,11 +85,13 @@ func TestCleanupExpiredKeys(t *testing.T) {
 	store := NewInMemoryStore()
 
 	store.Set("shortLived", "tempValue", 100)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(501 * time.Millisecond)
 
 	store.mu.Lock()
 	_, exists := store.data["shortLived"]
 	store.mu.Unlock()
+
+	fmt.Println("Key exists in store?", exists)
 
 	if exists {
 		t.Fatalf("Key 'shortLived' should have been removed by cleanupExpiredKeys, but it still exists")
