@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"testing"
 	"time"
 )
@@ -100,11 +99,8 @@ func TestDelete(t *testing.T) {
 	store := NewInMemoryStore()
 
 	store.Set("deleteMe", "exists", 0)
-	store.Delete([]string{"deleteMe"})
 
 	count, err := store.Delete([]string{"deleteMe"})
-
-	fmt.Println(">>>> count", count, "err", err)
 
 	if err != nil || count != 1 {
 		t.Fatalf("Expected 1 keys deleted, but got: %v, error: %v", count, err)

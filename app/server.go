@@ -163,8 +163,6 @@ func runDelete(conn net.Conn, args []string, store *InMemoryStore) {
 		return
 	}
 
-	fmt.Println(">> ✅ Keys: ", args[1:])
-
 	count, err := store.Delete(args[1:])
 	if err != nil {
 		sendReply(conn, err.Error())
