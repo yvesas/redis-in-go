@@ -3,20 +3,40 @@ package main
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 type InMemoryStore struct {
-	data map[string]string
-	mu   sync.Mutex
+	data    map[string]string
+	expires map[string]int64
+	mu      sync.Mutex
 }
 
 func NewInMemoryStore() *InMemoryStore {
-	return &InMemoryStore{
-		data: make(map[string]string),
+	store := &InMemoryStore{
+		data:    make(map[string]string),
+		expires: make(map[string]int64),
+	}
+	go store.cleanupExpiredKeys()
+	return store
+}
+
+func (store *InMemoryStore) cleanupExpiredKeys() {
+	for {
+		time.Sleep(500 * time.Millisecond)
+		store.mu.Lock()
+		now := time.Now().UnixMilli()
+		for key, exp := range store.expires {
+			if now > exp {
+				delete(store.data, key)
+				delete(store.expires, key)
+			}
+		}
+		store.mu.Unlock()
 	}
 }
 
-func (store *InMemoryStore) Set(key string, value string) (string, error) {
+func (store *InMemoryStore) Set(key string, value string, ttlMs int64) (string, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("❌ Panic recovered in Set:", r)
@@ -31,10 +51,18 @@ func (store *InMemoryStore) Set(key string, value string) (string, error) {
 	defer store.mu.Unlock()
 
 	if existingValue, exists := store.data[key]; exists && existingValue == value {
+		fmt.Println("⚠️ Key already exists with the same value. No changes made.")
 		return "⚠️ Key already exists with the same value. No changes made.", nil
 	}
 
 	store.data[key] = value
+	if ttlMs > 0 {
+		store.expires[key] = time.Now().UnixMilli() + ttlMs
+	} else {
+		delete(store.expires, key)
+	}
+
+	fmt.Printf("✅ Added: [%s] -> %s", key, value)
 	return fmt.Sprintf("✅ Added: [%s] -> %s", key, value), nil
 }
 
@@ -51,6 +79,12 @@ func (store *InMemoryStore) Get(key string) (string, error) {
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
+
+	if exp, exists := store.expires[key]; exists && time.Now().UnixMilli() > exp {
+		delete(store.data, key)
+		delete(store.expires, key)
+		return "", fmt.Errorf("⚠️ Key expired")
+	}
 
 	value, exists := store.data[key]
 	if !exists {

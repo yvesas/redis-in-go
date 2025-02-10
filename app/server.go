@@ -124,12 +124,19 @@ func runEcho(conn net.Conn, args []string, store *InMemoryStore) {
 	}
 }
 func runSet(conn net.Conn, args []string, store *InMemoryStore) {
-	if len(args) <= 2 {
-		sendReply(conn, "⚠️ Invalid key or value. Both must be non-empty.")
+	if len(args) < 3 {
+		sendReply(conn, "⚠️ Invalid SET command. Usage: SET key value [PX milliseconds]")
 		return
 	}
 
-	_, err := store.Set(args[1], args[2])
+	key, value := args[1], args[2]
+	var ttlMs int64 = 0
+
+	if len(args) == 5 && strings.ToUpper(args[3]) == "PX" {
+		fmt.Sscanf(args[4], "%d", &ttlMs)
+	}
+
+	_, err := store.Set(key, value, ttlMs)
 
 	if err != nil {
 		sendReply(conn, err.Error())
