@@ -207,38 +207,62 @@ func runListKeys(conn net.Conn, args []string, ctx *AppContext) {
 	sendReply(conn, keys)
 }
 func runConfig(conn net.Conn, args []string, ctx *AppContext) {
-	if len(args) <= 1 {
-		sendReply(conn, "-ERR Invalid method")
-		return
+	// if len(args) < 3 {
+	// 	sendReply(conn, "-ERR Invalid command")
+	// 	return
+	// }
+
+	commands := map[string]func(net.Conn, []string, *AppContext){
+		"SET": setConfig,
+		"GET": getConfig,
+		// "DEL":
+		"LIST": ListConfig,
 	}
 
-	method := strings.ToUpper(args[0])
-	if method == "GET" {
-		if len(args) != 2 {
-			sendReply(conn, "-ERR Invalid GET command. Usage: CONFIG GET key")
-			return
-		}
-		value, err := ctx.Config.Get(args[1])
-		if err != nil {
-			sendReply(conn, value)
-			return
-		}
-		sendReply(conn, value)
+	command := strings.ToUpper(args[1])
+	data := args[2:]
 
-	} else if method == "SET" {
-		if len(args) != 3 {
-			sendReply(conn, "-ERR Invalid SET command. Usage: CONFIG SET key value")
-			return
-		}
-		key, value := args[1], args[2]
-		_, err := ctx.Config.Set(key, value)
-		if err != nil {
-			sendReply(conn, err.Error())
-			return
-		}
-		sendReply(conn, "OK")
+	if handler, exists := commands[command]; exists {
+		handler(conn, data, ctx)
 	} else {
-		fmt.Println("❌ Unknown command:", args)
+		fmt.Println("❌ Unknown command:", data)
 		sendReply(conn, "-ERR Unknown command")
 	}
+}
+
+func getConfig(conn net.Conn, args []string, ctx *AppContext) {
+	if len(args) < 1 {
+		sendReply(conn, "-ERR Invalid GET command. Usage: CONFIG GET key")
+		return
+	}
+	value, err := ctx.Config.Get(args[0])
+	if err != nil {
+		sendReply(conn, err.Error())
+		return
+	}
+	sendReply(conn, value)
+}
+
+func setConfig(conn net.Conn, args []string, ctx *AppContext) {
+	if len(args) < 2 {
+		sendReply(conn, "-ERR Invalid SET command. Usage: CONFIG SET key value")
+		return
+	}
+	key, value := args[0], args[1]
+	_, err := ctx.Config.Set(key, value)
+	if err != nil {
+		sendReply(conn, err.Error())
+		return
+	}
+	sendReply(conn, "OK")
+}
+
+func ListConfig(conn net.Conn, args []string, ctx *AppContext) {
+	keys, err := ctx.Store.ListKeys()
+	if err != nil {
+		sendReply(conn, "$-1") // Empty array in RESP
+		return
+	}
+	fmt.Println("✅ Keys configured:", keys)
+	sendReply(conn, keys)
 }
