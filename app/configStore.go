@@ -59,6 +59,8 @@ func (store *ConfigStore) Set(key string, value string) (string, error) {
 		return "⚠️ Key already exists with the same value. No changes made.", nil
 	}
 
+	store.data[key] = value
+
 	fmt.Printf("✅ Added new config: [%s] -> %s\n", key, value)
 	return fmt.Sprintf("✅ Added new config: [%s] -> %s", key, value), nil
 }
@@ -78,8 +80,6 @@ func (store *ConfigStore) Get(key string) (string, error) {
 	defer store.mu.Unlock()
 
 	value, exists := store.data[key]
-
-	fmt.Println("❌ Value for key:", key, "is:", value)
 
 	if !exists {
 		return "", fmt.Errorf("⚠️ Key not found")

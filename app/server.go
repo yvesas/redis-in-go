@@ -207,10 +207,10 @@ func runListKeys(conn net.Conn, args []string, ctx *AppContext) {
 	sendReply(conn, keys)
 }
 func runConfig(conn net.Conn, args []string, ctx *AppContext) {
-	// if len(args) < 3 {
-	// 	sendReply(conn, "-ERR Invalid command")
-	// 	return
-	// }
+	if len(args) < 2 {
+		sendReply(conn, "-ERR Invalid Config command")
+		return
+	}
 
 	commands := map[string]func(net.Conn, []string, *AppContext){
 		"SET": setConfig,
@@ -258,7 +258,7 @@ func setConfig(conn net.Conn, args []string, ctx *AppContext) {
 }
 
 func ListConfig(conn net.Conn, args []string, ctx *AppContext) {
-	keys, err := ctx.Store.ListKeys()
+	keys, err := ctx.Config.ListConfig()
 	if err != nil {
 		sendReply(conn, "$-1") // Empty array in RESP
 		return
