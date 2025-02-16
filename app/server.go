@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -9,10 +10,29 @@ import (
 	"strings"
 )
 
+type AppContext struct {
+	Store  *InMemoryStore
+	Config *ConfigStore
+}
+
 func main() {
 	host := "0.0.0.0"
 	port := 6379
 	address := fmt.Sprintf("%s:%d", host, port)
+
+	dir := flag.String("dir", "./data", "Directory to save files")
+	dbfilename := flag.String("dbfilename", "dump.rdb", "Database file name")
+	flag.Parse()
+
+	config := NewConfigStore()
+	success, errorConfig := config.Init(*dir, *dbfilename)
+	if condition := success; condition {
+		fmt.Printf("✅ Initialized config [dir]: %s - [dbfilename]: %s\n", *dir, *dbfilename)
+	}
+	if errorConfig != nil {
+		fmt.Printf("❌ Failed to init config [dir]: %s - [dbfilename]: %s: %v\n", *dir, *dbfilename, errorConfig)
+		os.Exit(1)
+	}
 
 	l, err := net.Listen("tcp", address)
 	if err != nil {
@@ -24,6 +44,11 @@ func main() {
 
 	store := NewInMemoryStore()
 
+	appCtx := &AppContext{
+		Store:  store,
+		Config: config,
+	}
+
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -31,21 +56,22 @@ func main() {
 			continue
 		}
 
-		go handleConnection(conn, store)
+		go handleConnection(conn, appCtx)
 	}
 }
 
-func handleConnection(conn net.Conn, store *InMemoryStore) {
+func handleConnection(conn net.Conn, appCtx *AppContext) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
-	commands := map[string]func(net.Conn, []string, *InMemoryStore){
-		"PING": func(c net.Conn, args []string, store *InMemoryStore) { sendReply(c, "PONG") },
-		"ECHO": runEcho,
-		"SET":  runSet,
-		"GET":  runGet,
-		"DEL":  runDelete,
-		"LIST": runListKeys,
+	commands := map[string]func(net.Conn, []string, *AppContext){
+		"PING":   func(c net.Conn, args []string, ctx *AppContext) { sendReply(c, "PONG") },
+		"ECHO":   runEcho,
+		"SET":    runSet,
+		"GET":    runGet,
+		"DEL":    runDelete,
+		"LIST":   runListKeys,
+		"CONFIG": runConfig,
 	}
 
 	for {
@@ -71,7 +97,7 @@ func handleConnection(conn net.Conn, store *InMemoryStore) {
 
 		command := strings.ToUpper(args[0])
 		if handler, exists := commands[command]; exists {
-			handler(conn, args, store)
+			handler(conn, args, appCtx)
 		} else {
 			fmt.Println("❌ Unknown command:", args)
 			sendReply(conn, "-ERR Unknown command")
@@ -107,7 +133,7 @@ func sendReply(conn net.Conn, message interface{}) {
 	fmt.Println("✅ Sent:", response)
 }
 
-func runEcho(conn net.Conn, args []string, store *InMemoryStore) {
+func runEcho(conn net.Conn, args []string, ctx *AppContext) {
 	if len(args) > 1 {
 		sendReply(conn, args[1])
 	} else {
@@ -115,7 +141,7 @@ func runEcho(conn net.Conn, args []string, store *InMemoryStore) {
 	}
 }
 
-func runSet(conn net.Conn, args []string, store *InMemoryStore) {
+func runSet(conn net.Conn, args []string, ctx *AppContext) {
 	if len(args) < 3 {
 		sendReply(conn, "-ERR Invalid SET command. Usage: SET key value [PX milliseconds]")
 		return
@@ -133,7 +159,7 @@ func runSet(conn net.Conn, args []string, store *InMemoryStore) {
 		ttlMs = parsedTTL
 	}
 
-	_, err := store.Set(key, value, ttlMs)
+	_, err := ctx.Store.Set(key, value, ttlMs)
 
 	if err != nil {
 		sendReply(conn, err.Error())
@@ -142,13 +168,13 @@ func runSet(conn net.Conn, args []string, store *InMemoryStore) {
 	sendReply(conn, "OK")
 }
 
-func runGet(conn net.Conn, args []string, store *InMemoryStore) {
+func runGet(conn net.Conn, args []string, ctx *AppContext) {
 	if len(args) <= 1 {
 		sendReply(conn, "-ERR Invalid key")
 		return
 	}
 
-	value, err := store.Get(args[1])
+	value, err := ctx.Store.Get(args[1])
 	if err != nil {
 		sendReply(conn, value)
 		return
@@ -157,13 +183,13 @@ func runGet(conn net.Conn, args []string, store *InMemoryStore) {
 	sendReply(conn, value)
 }
 
-func runDelete(conn net.Conn, args []string, store *InMemoryStore) {
+func runDelete(conn net.Conn, args []string, ctx *AppContext) {
 	if len(args) <= 1 {
 		sendReply(conn, "-ERR Invalid key")
 		return
 	}
 
-	count, err := store.Delete(args[1:])
+	count, err := ctx.Store.Delete(args[1:])
 	if err != nil {
 		sendReply(conn, err.Error())
 		return
@@ -171,12 +197,48 @@ func runDelete(conn net.Conn, args []string, store *InMemoryStore) {
 	sendReply(conn, count)
 }
 
-func runListKeys(conn net.Conn, args []string, store *InMemoryStore) {
-	keys, err := store.ListKeys()
+func runListKeys(conn net.Conn, args []string, ctx *AppContext) {
+	keys, err := ctx.Store.ListKeys()
 	if err != nil {
 		sendReply(conn, "$-1") // Empty array in RESP
 		return
 	}
 	fmt.Println("✅ Keys in Store:", keys)
 	sendReply(conn, keys)
+}
+func runConfig(conn net.Conn, args []string, ctx *AppContext) {
+	if len(args) <= 1 {
+		sendReply(conn, "-ERR Invalid method")
+		return
+	}
+
+	method := strings.ToUpper(args[0])
+	if method == "GET" {
+		if len(args) != 2 {
+			sendReply(conn, "-ERR Invalid GET command. Usage: CONFIG GET key")
+			return
+		}
+		value, err := ctx.Config.Get(args[1])
+		if err != nil {
+			sendReply(conn, value)
+			return
+		}
+		sendReply(conn, value)
+
+	} else if method == "SET" {
+		if len(args) != 3 {
+			sendReply(conn, "-ERR Invalid SET command. Usage: CONFIG SET key value")
+			return
+		}
+		key, value := args[1], args[2]
+		_, err := ctx.Config.Set(key, value)
+		if err != nil {
+			sendReply(conn, err.Error())
+			return
+		}
+		sendReply(conn, "OK")
+	} else {
+		fmt.Println("❌ Unknown command:", args)
+		sendReply(conn, "-ERR Unknown command")
+	}
 }
